@@ -1,0 +1,48 @@
+stages:
+  - test
+  - review
+
+# SAST（静的セキュリティスキャン）— GitLab無料版に内蔵
+include:
+  - template: Security/SAST.gitlab-ci.yml
+
+sast:
+  stage: test
+
+# 記事のlintチェック
+article-lint:
+  stage: test
+  image: python:3.12-slim
+  script:
+    - |
+      echo "## 記事lintチェック" > lint-report.md
+      ERRORS=0
+      for article in $(find articles -name "article.md" | head -5); do
+        echo "checking: $article"
+        if grep -Pn '\*\*[^*]*「' "$article" 2>/dev/null; then
+          echo "- $article: 太字+カギ括弧の併用を検出" >> lint-report.md
+          ERRORS=$((ERRORS+1))
+        fi
+      done
+      cat lint-report.md
+      if [ "$ERRORS" -gt 0 ]; then echo "警告: ${ERRORS}件の問題を検出（ブロックしません）"; fi
+  allow_failure: true
+  artifacts:
+    paths:
+      - lint-report.md
+    when: always
+
+# Claude APIによる記事レビュー（手動トリガー）
+ai-review:
+  stage: review
+  image: python:3.12-slim
+  when: manual
+  script:
+    - pip install -q anthropic
+    - python3 scripts/ai-review.py
+  artifacts:
+    paths:
+      - ai-review-report.md
+    when: always
+  variables:
+    ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY

@@ -1,0 +1,155 @@
+name: 記事公開処理
+
+# トリガー: Issueコメントに「公開済み: <URL>」を書く
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  process-publish:
+    if: startsWith(github.event.comment.body, '公開済み:')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 公開処理を実行
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: |
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          COMMENT_BODY="${{ github.event.comment.body }}"
+          REPO="${{ github.repository }}"
+
+          # URLを抽出
+          URL=$(echo "$COMMENT_BODY" | grep -oP 'https?://\S+')
+          if [ -z "$URL" ]; then
+            echo "::error::URLが見つかりません"
+            exit 1
+          fi
+
+          echo "Issue: #${ISSUE_NUMBER}" >> $GITHUB_STEP_SUMMARY
+          echo "URL: ${URL}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # 1. ステータスラベルを「公開済み」に変更
+          # 既存のステータスラベルを削除
+          for LABEL in "タネ" "下準備中" "執筆中" "レビュー中" "ドラフト作成中" "アイデア" "内部議論" "保留"; do
+            gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --remove-label "$LABEL" 2>/dev/null || true
+          done
+          gh issue edit "$ISSUE_NUMBER" --repo "$REPO" --add-label "公開済み"
+          echo "✓ ラベル → 公開済み" >> $GITHUB_STEP_SUMMARY
+
+          # 2. Issueをクローズ
+          gh issue close "$ISSUE_NUMBER" --repo "$REPO"
+          echo "✓ Issue クローズ" >> $GITHUB_STEP_SUMMARY
+
+          # 3. ProjectのステータスとURLフィールドを更新
+          python3 << PYEOF
+          import json, urllib.request
+
+          TOKEN = "$GH_TOKEN"
+          PROJECT_ID = "PVT_kwHOD3OJhs4BUeFd"
+          STATUS_FIELD_ID = "PVTSSF_lAHOD3OJhs4BUeFdzhBl-HQ"
+          URL_FIELD_ID = "PVTF_lAHOD3OJhs4BUeFdzhBmCL0"
+          PUBLISHED_OPTION_ID = "d8355eb6"
+          ISSUE_NUMBER = int("$ISSUE_NUMBER")
+          URL = "$URL"
+
+          def graphql(query, variables=None):
+              body = json.dumps({"query": query, "variables": variables or {}}).encode()
+              req = urllib.request.Request("https://api.github.com/graphql", data=body, headers={
+                  "Authorization": f"bearer {TOKEN}",
+                  "Content-Type": "application/json",
+              })
+              with urllib.request.urlopen(req, timeout=15) as resp:
+                  return json.loads(resp.read())
+
+          # Project内のアイテムIDを探す
+          data = graphql("""
+          query {
+            node(id: "%s") {
+              ... on ProjectV2 {
+                items(first: 100) {
+                  nodes {
+                    id
+                    content { ... on Issue { number } }
+                  }
+                }
+              }
+            }
+          }""" % PROJECT_ID)
+
+          item_id = None
+          for node in data["data"]["node"]["items"]["nodes"]:
+              if node.get("content", {}).get("number") == ISSUE_NUMBER:
+                  item_id = node["id"]
+                  break
+
+          if not item_id:
+              print("Project内にIssueが見つかりません")
+              exit(0)
+
+          # ステータス更新
+          graphql("""
+          mutation(\$pid: ID!, \$iid: ID!, \$fid: ID!, \$oid: String!) {
+            updateProjectV2ItemFieldValue(input: {
+              projectId: \$pid, itemId: \$iid, fieldId: \$fid,
+              value: { singleSelectOptionId: \$oid }
+            }) { projectV2Item { id } }
+          }""", {"pid": PROJECT_ID, "iid": item_id, "fid": STATUS_FIELD_ID, "oid": PUBLISHED_OPTION_ID})
+          print("✓ Projectステータス → 公開済み")
+
+          # URL設定
+          graphql("""
+          mutation(\$pid: ID!, \$iid: ID!, \$fid: ID!, \$val: String!) {
+            updateProjectV2ItemFieldValue(input: {
+              projectId: \$pid, itemId: \$iid, fieldId: \$fid,
+              value: { text: \$val }
+            }) { projectV2Item { id } }
+          }""", {"pid": PROJECT_ID, "iid": item_id, "fid": URL_FIELD_ID, "val": URL})
+          print("✓ Project公開URL設定")
+          PYEOF
+
+          echo "✓ Project更新完了" >> $GITHUB_STEP_SUMMARY
+
+          # 4. タイトルとタグを表示（投稿用コピペ）
+          ISSUE_JSON=$(gh issue view "$ISSUE_NUMBER" --repo "$REPO" --json title,body)
+          TITLE=$(echo "$ISSUE_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['title'])")
+          BODY=$(echo "$ISSUE_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('body',''))")
+          CLEAN_TITLE=$(echo "$TITLE" | sed 's/^\[.*\] //')
+
+          # bodyからタグを抽出（「タグ:」「タグ候補:」行のバッククォート内テキスト）
+          TAGS=$(echo "$BODY" | python3 -c "
+          import sys, re
+          text = sys.stdin.read()
+          m = re.search(r'タグ(?:候補)?[:：]\s*(.+)', text)
+          if m:
+              tags = re.findall(r'\x60([^\x60]+)\x60', m.group(1))
+              if not tags:
+                  tags = [t.strip() for t in m.group(1).split(',') if t.strip()]
+              print(' / '.join(tags))
+          ")
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 投稿用（コピペ）" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**タイトル:**" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$CLEAN_TITLE" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          if [ -n "$TAGS" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**タグ:**" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "$TAGS" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**公開URL:**" >> $GITHUB_STEP_SUMMARY
+          echo "$URL" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,80 @@
+name: ブログネタ
+description: 新しいブログ記事のネタを登録する
+title: "[ネタXX] "
+labels: ["タネ"]
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 投稿先
+      options:
+        - APC技術ブログ
+        - Qiita
+        - 内部資料
+    validations:
+      required: true
+
+  - type: textarea
+    id: reader
+    attributes:
+      label: 読者と持ち帰るもの
+      description: この記事は誰に向けて書き、読んだ人は何を得るか
+      placeholder: |
+        読者: Platform Engineeringに興味があるエンジニア
+        持ち帰るもの: 自分のワークフローにも仕組み化を適用できるという気づき
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: なぜ書くか
+      description: きっかけ・背景・問題意識
+      placeholder: |
+        ITmediaの記事がAIリスクを7つ指摘していたが「ではどうするか」がなかった。
+        自分たちの実践で答えたい。
+    validations:
+      required: true
+
+  - type: textarea
+    id: first_hand
+    attributes:
+      label: 一次情報（自分で体験・検証したこと）
+      description: この記事の核となる一次情報。他の記事にはない自分だけの体験
+      placeholder: |
+        - CLAUDE.md + hooks 8本でブログ品質を担保した半年間の実践
+        - GitLab SASTをローカルで無料で回した検証結果
+    validations:
+      required: true
+
+  - type: textarea
+    id: outline
+    attributes:
+      label: 構成案
+      description: 壁打ちで合意した構成。合意前なら空でOK
+      placeholder: |
+        1. 導入: 問題提起
+        2. 本論: 実践内容
+        3. 考察: 何がわかったか
+        4. まとめ
+    validations:
+      required: false
+
+  - type: input
+    id: tags
+    attributes:
+      label: タグ（カンマ区切り、3つまで）
+      placeholder: "GitHub, GitLab, Gitea"
+    validations:
+      required: false
+
+  - type: textarea
+    id: references
+    attributes:
+      label: 出典・関連
+      description: 参照URL、関連する既存記事、きっかけとなった記事
+      placeholder: |
+        - https://www.itmedia.co.jp/aiplus/articles/2604/10/news013.html
+        - 関連: ネタ38（ハーネスの2層）
+    validations:
+      required: false

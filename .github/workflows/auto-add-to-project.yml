@@ -1,0 +1,46 @@
+name: Issue → Project 自動追加
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: read
+
+jobs:
+  add-to-project:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Projectに追加
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+          PROJECT_ID: PVT_kwHOD3OJhs4BUeFd
+          STATUS_FIELD_ID: PVTSSF_lAHOD3OJhs4BUeFdzhBl-HQ
+          TANE_OPTION_ID: "792f05de"
+        run: |
+          ISSUE_NODE_ID="${{ github.event.issue.node_id }}"
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+
+          # Project に追加
+          ITEM_ID=$(gh api graphql -f query='
+            mutation($pid: ID!, $cid: ID!) {
+              addProjectV2ItemById(input: { projectId: $pid, contentId: $cid }) {
+                item { id }
+              }
+            }' -f pid="$PROJECT_ID" -f cid="$ISSUE_NODE_ID" --jq '.data.addProjectV2ItemById.item.id')
+
+          if [ -z "$ITEM_ID" ]; then
+            echo "::error::Projectへの追加に失敗しました"
+            exit 1
+          fi
+
+          # ステータスを「タネ」に設定
+          gh api graphql -f query='
+            mutation($pid: ID!, $iid: ID!, $fid: ID!, $oid: String!) {
+              updateProjectV2ItemFieldValue(input: {
+                projectId: $pid, itemId: $iid, fieldId: $fid,
+                value: { singleSelectOptionId: $oid }
+              }) { projectV2Item { id } }
+            }' -f pid="$PROJECT_ID" -f iid="$ITEM_ID" -f fid="$STATUS_FIELD_ID" -f oid="$TANE_OPTION_ID"
+
+          echo "✓ Issue #${ISSUE_NUMBER} をProjectに追加（ステータス: タネ）" >> $GITHUB_STEP_SUMMARY

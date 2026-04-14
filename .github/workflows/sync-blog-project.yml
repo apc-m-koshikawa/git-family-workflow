@@ -1,0 +1,29 @@
+name: ブログプロジェクト同期チェック
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 1'  # 毎週月曜 09:00 JST
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 整合性チェック
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: python3 scripts/sync-blog-project.py --report markdown
+
+      - name: 安全な修正を適用（手動実行時のみ）
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: python3 scripts/sync-blog-project.py --safe-only
